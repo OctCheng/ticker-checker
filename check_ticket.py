@@ -91,4 +91,4 @@ if __name__ == "__main__":
     print("=" * 50)
     
     # 測試發送通知，確定成功收到訊息後可刪除或註解下一行
-    send_telegram("✅ 測試通知：GitHub 機器人執行完成，Telegram 連線成功！")
+    # send_telegram("✅ 測試通知：GitHub 機器人執行完成，Telegram 連線成功！")
