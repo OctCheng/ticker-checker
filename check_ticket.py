@@ -1,5 +1,6 @@
 import requests
 import os
+import time
 
 # === 設定 (目前為測試活動 ID) ===
 ACTIVITY_ID = "7f9c57d1f3e5c15d97c51408f26ca085"
@@ -8,11 +9,17 @@ ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") 
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# 加上更逼真的瀏覽器 Headers 與防止快取機制
 HEADERS = { 
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", 
     "Accept": "application/json, text/plain, */*", 
+    "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
     "Origin": "https://ticketplus.com.tw",
-    "Referer": ACTIVITY_URL
+    "Referer": ACTIVITY_URL,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site",
+    "Connection": "keep-alive"
 }
 
 def send_telegram(message): 
@@ -41,9 +48,10 @@ def send_telegram(message):
 
 def get_sessions_from_api(activity_id):
     """嘗試多個 API 端點取得場次資料，防止 404 中斷"""
+    timestamp = int(time.time() * 1000)
     endpoints = [
-        f"https://api.ticketplus.com.tw/config/api/v1/session?activityId={activity_id}",
-        f"https://api.ticketplus.com.tw/config/api/v1/get?activityId={activity_id}"
+        f"https://api.ticketplus.com.tw/config/api/v1/get?activityId={activity_id}&_={timestamp}",
+        f"https://api.ticketplus.com.tw/config/api/v1/session?activityId={activity_id}&_={timestamp}"
     ]
     
     for url in endpoints:
@@ -56,7 +64,7 @@ def get_sessions_from_api(activity_id):
                     print(f"成功從 API ({url.split('?')[0].split('/')[-1]}) 取得 {len(sessions)} 個場次")
                     return sessions
             else:
-                print(f"⚠️ API 嘗試回傳非 200 狀態碼 ({resp.status_code}): {url}")
+                print(f"⚠️ API 嘗試回傳非 200 狀態碼 ({resp.status_code}): {url.split('?')[0]}")
         except Exception as e:
             print(f"⚠️ API 請求異常: {e}")
             
@@ -64,8 +72,9 @@ def get_sessions_from_api(activity_id):
 
 def get_session_ticket_details(session_id):
     """深入查詢特定場次 (sessionId) 內各票價區域的明細狀態"""
+    timestamp = int(time.time() * 1000)
     try:
-        ticket_api = f"https://api.ticketplus.com.tw/config/api/v1/ticket?sessionId={session_id}"
+        ticket_api = f"https://api.ticketplus.com.tw/config/api/v1/ticket?sessionId={session_id}&_={timestamp}"
         resp = requests.get(ticket_api, headers=HEADERS, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
@@ -89,7 +98,7 @@ def check_ticket_status():
     sessions = get_sessions_from_api(ACTIVITY_ID)
     
     if not sessions:
-        print("❌ 無法取得場次資料（所有 API 端點皆未回應有效資料）")
+        print("❌ 無法取得場次資料（所有 API 端點皆未回應有效資料或被防火牆阻擋）")
         return "無資料"
 
     changed_sessions = []
