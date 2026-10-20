@@ -34,13 +34,13 @@ def check_ticket_status():
             page_text = page.inner_text("body")
             print(f"成功擷取頁面文字，長度: {len(page_text)} 字元")
             
-            # 只有當畫面出現「暫無票券」或「立即購買」時，才會發送通知
-            if "暫無票券" in page_text or "立即購買" in page_text:
-                print("🎉 偵測到有場次狀態改變（出現暫無票券或可購買）！")
+            # 【修正重點】：拿掉容易誤判的「暫無票券」，只抓「立即購買」或「選購」
+            if "立即購買" in page_text or "選購" in page_text:
+                print("🎉 偵測到有票可以買！")
                 msg = (
-                    f"🚨🚨🚨 <b>田馥甄演唱會票況有變化！</b>\n\n"
-                    f"系統偵測到頁面出現非全數完售的狀態！\n\n"
-                    f"<b>當前抓到的網頁狀態文字片段：</b>\n"
+                    f"🚨🚨🚨 <b>田馥甄演唱會出現購票按鈕！快搶！</b>\n\n"
+                    f"系統偵測到頁面出現「立即購買」或「選購」！\n\n"
+                    f"<b>網頁文字片段：</b>\n"
                     f"<code>{page_text[:150]}...</code>\n\n"
                     f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
                 )
