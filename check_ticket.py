@@ -1,6 +1,4 @@
 import cloudscraper
-from bs4 import BeautifulSoup
-import json
 import os
 
 ACTIVITY_ID = "7f9c57d1f3e5c15d97c51408f26ca085"
@@ -16,57 +14,48 @@ scraper = cloudscraper.create_scraper(
 def send_telegram(message): 
     token = TELEGRAM_BOT_TOKEN.strip()
     chat_id = TELEGRAM_CHAT_ID.strip()
-    if not token or not chat_id: return
+    if not token or not chat_id: 
+        print("❌ 未設定 Telegram Token 或 Chat ID")
+        return
     url = f"https://api.telegram.org/bot{token}/sendMessage" 
     try: 
-        scraper.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10) 
-    except Exception: 
-        pass
+        resp = scraper.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10) 
+        if resp.status_code == 200:
+            print("✅ Telegram 通知發送成功！")
+        else:
+            print(f"❌ Telegram 發送失敗: {resp.status_code} {resp.text}")
+    except Exception as e: 
+        print(f"❌ Telegram 錯誤: {e}")
 
 def check_ticket_status():
     print("=" * 50)
-    print("🔍 正在抓取活動網頁並解析票況...")
+    print("🔍 正在透過 Cloudscraper 抓取活動網頁...")
     
     try:
         resp = scraper.get(ACTIVITY_URL, timeout=15)
         print(f"網頁連線狀態碼: {resp.status_code}")
         
         if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, 'html.parser')
+            html_content = resp.text
             
-            # 檢查網頁標題確認是否成功進入
-            title = soup.find('title')
-            print(f"📌 網頁標題: {title.text if title else '無標題'}")
+            # 直接在網頁文字中搜尋關鍵字
+            if "銷售一空" in html_content:
+                print("📌 目前網頁偵測結果：部分或全部場次顯示【銷售一空】")
             
-            # 嘗試尋找網頁中的內嵌 JSON 資料 (通常 Nuxt 網站會放在 __NUXT__ 或 script 標籤中)
-            scripts = soup.find_all('script')
-            found_data = False
-            
-            for s in scripts:
-                if s.string and ('session' in s.string or 'status' in s.string):
-                    # 這裡可以印出部分內容協助確認
-                    if 'activity' in s.string:
-                        print("🎯 找到包含活動資料的 Script 標籤！")
-                        found_data = True
-                        break
-            
-            if found_data:
-                print("✅ 成功透過網頁原始碼掌握活動結構！")
+            if "立即購買" in html_content or "暫無票券" in html_content:
+                print("🎉 偵測到網頁出現【立即購買】或【暫無票券】！")
+                send_telegram(f"🚨 <b>[測試通知] 遠大售票狀態改變！</b>\n\n👉 <a href='{ACTIVITY_URL}'>點此前往搶票頁面</a>")
+                return "有票/狀態改變"
             else:
-                print("⚠️ 網頁內容已載入，但未在 script 中直接命中關鍵字，改用文字檢索...")
-                
-            # 直接搜尋網頁上常見的狀態文字
-            page_text = soup.text
-            if "銷售一空" in page_text:
-                print("😢 網頁顯示目前有場次為：銷售一空")
-            if "立即購買" in page_text or "暫無票券" in page_text:
-                print("🎉 網頁中偵測到「立即購買」或「暫無票券」字眼！")
-                send_telegram(f"🚨 <b>[測試通知] 發現網頁狀態改變！</b>\n\n👉 <a href='{ACTIVITY_URL}'>點此前往查看</a>")
+                print("😢 目前未偵測到開放購買字眼")
+                return "全數售完"
         else:
             print(f"❌ 網頁抓取失敗，狀態碼: {resp.status_code}")
+            return "抓取失敗"
             
     except Exception as e:
         print(f"❌ 發生異常: {e}")
+        return "異常"
     print("=" * 50)
 
 if __name__ == "__main__":
