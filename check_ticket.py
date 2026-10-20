@@ -1,10 +1,10 @@
 import requests
 import os
 
-# === 設定 ===
-ACTIVITY_ID = "af2bd66d8fe65d78963cbb5bdc85771c"
+# === 設定 (目前為測試活動 ID) ===
+ACTIVITY_ID = "7f9c57d1f3e5c15d97c51408f26ca085"
 ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
-API_URL = f"https://api.ticketplus.com.tw/config/api/v1/session?activityId={ACTIVITY_ID}"
+SESSION_API_URL = f"https://api.ticketplus.com.tw/config/api/v1/session?activityId={ACTIVITY_ID}"
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") 
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -22,7 +22,7 @@ def send_telegram(message):
     chat_id = TELEGRAM_CHAT_ID.strip()
     
     if not token or not chat_id:
-        print("❌ 錯誤：未讀取到 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID")
+        print("❌ 錯誤：未設定 TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID")
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage" 
@@ -34,16 +34,38 @@ def send_telegram(message):
     try: 
         resp = requests.post(url, json=payload, timeout=10) 
         if resp.status_code == 200: 
-            print("✅ Telegram 通知已發送成功！") 
+            print("✅ Telegram 通知已成功發送！") 
         else: 
             print(f"❌ Telegram 發送失敗: {resp.status_code} {resp.text}") 
     except Exception as e: 
         print(f"❌ Telegram 發送錯誤: {e}")
 
+def get_session_ticket_details(session_id):
+    """深入查詢特定場次 (sessionId) 內各票價區域的明細狀態"""
+    try:
+        ticket_api = f"https://api.ticketplus.com.tw/config/api/v1/ticket?sessionId={session_id}"
+        resp = requests.get(ticket_api, headers=HEADERS, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            tickets = data.get("result", {}).get("ticket", [])
+            
+            detail_msgs = []
+            for t in tickets:
+                ticket_name = t.get("name", "票區")
+                price = t.get("price", "")
+                t_status = str(t.get("status", "")).lower().strip()
+                # 只要票區狀態不是完售，就記錄下來
+                if t_status not in ["soldout", "ended"]:
+                    detail_msgs.append(f"   ▫️ {ticket_name} (${price}): <b>{t_status}</b>")
+            return detail_msgs
+    except Exception as e:
+        print(f"⚠️ 抓取票區明細失敗 (sessionId: {session_id}): {e}")
+    return []
+
 def check_ticket_status(): 
-    """查詢 TicketPlus API 檢查場次售票狀態""" 
+    """查詢 TicketPlus API 檢查場次與各票區售票狀態""" 
     try: 
-        resp = requests.get(API_URL, headers=HEADERS, timeout=15) 
+        resp = requests.get(SESSION_API_URL, headers=HEADERS, timeout=15) 
         resp.raise_for_status() 
         data = resp.json()
         
@@ -54,29 +76,40 @@ def check_ticket_status():
             data = resp.json()
             sessions = data.get("result", {}).get("session", [])
 
-        print(f"頁面資料抓取成功，共找到 {len(sessions)} 個場次")
+        print(f"成功連線 API，共找到 {len(sessions)} 個場次")
 
-        available_count = 0
-        status_summary = []
+        changed_sessions = []
 
         for session in sessions:
             name = session.get("name", "演唱會場次")
-            status = session.get("status", "")
-            print(f"場次：{name} | 狀態：{status}")
+            session_id = session.get("id", "")
+            status = str(session.get("status", "")).lower().strip()
             
-            if status not in ["soldout", "sold_out", "ended"]:
-                available_count += 1
-                status_summary.append(f"🎫 {name}：<b>狀態改變（{status}）</b>")
-            else:
-                status_summary.append(f"❌ {name}：完售")
+            print(f"📌 [場次 API] {name} | sessionId: {session_id} | status: '{status}'")
+            
+            # 只要狀態不是純粹完售 (soldout/ended)，代表有釋票或狀態改變
+            if status not in ["soldout", "ended", ""]:
+                session_msg = f"🎫 <b>{name}</b> (狀態: <code>{status}</code>)"
+                
+                # 取得該場次具體的票區價位明細
+                if session_id:
+                    ticket_details = get_session_ticket_details(session_id)
+                    if ticket_details:
+                        session_msg += "\n" + "\n".join(ticket_details)
+                
+                changed_sessions.append(session_msg)
 
-        if available_count > 0:
-            msg = f"🎉🎉🎉 <b>田馥甄演唱會狀態改變/可能有票！</b>\n\n" + "\n".join(status_summary) + f"\n\n👉 搶票網址：{ACTIVITY_URL}"
-            print("🎉 發現潛在票券，準備發送 Telegram 通知！")
+        if changed_sessions:
+            msg = (
+                f"🚨🚨🚨 <b>[測試通知] 演唱會狀態改變 / 有票釋出！</b>\n\n"
+                + "\n\n".join(changed_sessions)
+                + f"\n\n👉 快去搶票：{ACTIVITY_URL}"
+            )
+            print("🎉 偵測到狀態改變，準備發送 Telegram 通知！")
             send_telegram(msg)
-            return "可能有票"
+            return "狀態變更/有票"
         else:
-            print("😢 目前所有場次均為售完狀態")
+            print("😢 目前所有場次 API 狀態均為 soldout")
             return "全數售完"
 
     except Exception as e: 
@@ -85,10 +118,7 @@ def check_ticket_status():
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("🔍 開始檢查田馥甄演唱會票券狀態...")
+    print("🔍 開始檢查票券狀態...")
     status = check_ticket_status()
     print(f"\n最終檢查結果: {status}")
     print("=" * 50)
-    
-    # 測試發送通知，確定成功收到訊息後可刪除或註解下一行
-    # send_telegram("✅ 測試通知：GitHub 機器人執行完成，Telegram 連線成功！")
