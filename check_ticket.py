@@ -2,6 +2,7 @@ import os
 from playwright.sync_api import sync_playwright
 import requests
 
+# === 田馥甄演唱會正式 ID ===
 ACTIVITY_ID = "af2bd66d8fe65d78963cbb5bdc85771c"
 ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
 
@@ -20,34 +21,32 @@ def send_telegram(message):
 
 def check_ticket_status():
     print("=" * 50)
-    print("🌐 正在啟動背景瀏覽器抓取即時畫面...")
+    print("🌐 正在透過背景瀏覽器檢查田馥甄演唱會票況...")
     
     with sync_playwright() as p:
-        # 啟動無頭瀏覽器 (Headless Chrome)
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
         try:
-            # 前往活動頁面並等待網路閒置、元素載入
             page.goto(ACTIVITY_URL, timeout=30000, wait_until="networkidle")
+            page.wait_for_timeout(3000) # 等待動態載入
             
-            # 額外等待 3 秒讓 JS 動態渲染完成
-            page.wait_for_timeout(3000)
-            
-            # 取得畫面上完整渲染後的文字內容
             page_text = page.inner_text("body")
             print(f"成功擷取頁面文字，長度: {len(page_text)} 字元")
             
-            # 檢查關鍵字
-            if "銷售一空" in page_text:
-                print("📌 偵測到畫面上有【銷售一空】")
-            
-            if "立即購買" in page_text or "暫無票券" in page_text:
-                print("🎉 成功在畫面上偵測到購買/票券狀態！")
-                send_telegram(f"🚨 <b>[Playwright 測試成功] 成功透過真實瀏覽器抓取頁面！</b>\n\n👉 <a href='{ACTIVITY_URL}'>點此前往搶票</a>")
+            # 只有當畫面出現「暫無票券」或「立即購買」時，才會發送通知
+            if "暫無票券" in page_text or "立即購買" in page_text:
+                print("🎉 偵測到有場次狀態改變（出現暫無票券或可購買）！")
+                msg = (
+                    f"🚨🚨🚨 <b>田馥甄演唱會票況有變化！</b>\n\n"
+                    f"系統偵測到頁面出現非全數完售的狀態，可能有釋票或清票！\n\n"
+                    f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
+                )
+                send_telegram(msg)
                 return "有票/狀態改變"
             else:
-                print("😢 畫面中未偵測到開放購買字眼")
+                # 目前全部完售，只在 GitHub 記錄印出文字，絕對不發送 Telegram 騷擾妳
+                print("😢 目前所有場次均顯示【銷售一空】，不發送通知")
                 return "全數售完"
                 
         except Exception as e:
