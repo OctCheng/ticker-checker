@@ -1,45 +1,73 @@
 import cloudscraper
-import time
+from bs4 import BeautifulSoup
+import json
+import os
 
 ACTIVITY_ID = "7f9c57d1f3e5c15d97c51408f26ca085"
+ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
+
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") 
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 scraper = cloudscraper.create_scraper(
     browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
 )
 
-def test_api():
+def send_telegram(message): 
+    token = TELEGRAM_BOT_TOKEN.strip()
+    chat_id = TELEGRAM_CHAT_ID.strip()
+    if not token or not chat_id: return
+    url = f"https://api.telegram.org/bot{token}/sendMessage" 
+    try: 
+        scraper.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10) 
+    except Exception: 
+        pass
+
+def check_ticket_status():
     print("=" * 50)
-    print("🔍 測試遠大售票隱藏的正確參數...")
+    print("🔍 正在抓取活動網頁並解析票況...")
     
-    timestamp = int(time.time() * 1000)
-    
-    # 根據報錯訊息，我們測試三個最有可能的正確 API 組合
-    urls_to_test = {
-        "測試 1 (eventId)": f"https://api.ticketplus.com.tw/config/api/v1/get?eventId={ACTIVITY_ID}&_={timestamp}",
-        "測試 2 (productId)": f"https://api.ticketplus.com.tw/config/api/v1/get?productId={ACTIVITY_ID}&_={timestamp}",
-        "測試 3 (主活動 API)": f"https://api.ticketplus.com.tw/activity/api/v1/activity/{ACTIVITY_ID}?_={timestamp}"
-    }
-    
-    for name, url in urls_to_test.items():
-        print(f"\n▶️ {name} ...")
-        try:
-            resp = scraper.get(url, timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
-                # 如果回傳的資料裡面沒有 errCode，代表我們成功拿到真實資料了！
-                if "errCode" not in data:
-                    print("✅ 賓果！這個 API 是正確的！")
-                    print(f"回傳的 Keys: {list(data.keys())}")
-                    if "result" in data:
-                        print(f"Result 裡面的 Keys: {list(data['result'].keys())}")
-                else:
-                    print(f"❌ 錯誤: {data.get('errMsg')}")
-            else:
-                print(f"❌ 失敗，狀態碼: {resp.status_code}")
-        except Exception as e:
-            print(f"❌ 發生異常: {e}")
+    try:
+        resp = scraper.get(ACTIVITY_URL, timeout=15)
+        print(f"網頁連線狀態碼: {resp.status_code}")
+        
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
             
-    print("\n" + "=" * 50)
+            # 檢查網頁標題確認是否成功進入
+            title = soup.find('title')
+            print(f"📌 網頁標題: {title.text if title else '無標題'}")
+            
+            # 嘗試尋找網頁中的內嵌 JSON 資料 (通常 Nuxt 網站會放在 __NUXT__ 或 script 標籤中)
+            scripts = soup.find_all('script')
+            found_data = False
+            
+            for s in scripts:
+                if s.string and ('session' in s.string or 'status' in s.string):
+                    # 這裡可以印出部分內容協助確認
+                    if 'activity' in s.string:
+                        print("🎯 找到包含活動資料的 Script 標籤！")
+                        found_data = True
+                        break
+            
+            if found_data:
+                print("✅ 成功透過網頁原始碼掌握活動結構！")
+            else:
+                print("⚠️ 網頁內容已載入，但未在 script 中直接命中關鍵字，改用文字檢索...")
+                
+            # 直接搜尋網頁上常見的狀態文字
+            page_text = soup.text
+            if "銷售一空" in page_text:
+                print("😢 網頁顯示目前有場次為：銷售一空")
+            if "立即購買" in page_text or "暫無票券" in page_text:
+                print("🎉 網頁中偵測到「立即購買」或「暫無票券」字眼！")
+                send_telegram(f"🚨 <b>[測試通知] 發現網頁狀態改變！</b>\n\n👉 <a href='{ACTIVITY_URL}'>點此前往查看</a>")
+        else:
+            print(f"❌ 網頁抓取失敗，狀態碼: {resp.status_code}")
+            
+    except Exception as e:
+        print(f"❌ 發生異常: {e}")
+    print("=" * 50)
 
 if __name__ == "__main__":
-    test_api()
+    check_ticket_status()
