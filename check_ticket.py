@@ -4,7 +4,6 @@ import os
 # === 設定 (目前為測試活動 ID) ===
 ACTIVITY_ID = "7f9c57d1f3e5c15d97c51408f26ca085"
 ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
-SESSION_API_URL = f"https://api.ticketplus.com.tw/config/api/v1/session?activityId={ACTIVITY_ID}"
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") 
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -40,6 +39,29 @@ def send_telegram(message):
     except Exception as e: 
         print(f"❌ Telegram 發送錯誤: {e}")
 
+def get_sessions_from_api(activity_id):
+    """嘗試多個 API 端點取得場次資料，防止 404 中斷"""
+    endpoints = [
+        f"https://api.ticketplus.com.tw/config/api/v1/session?activityId={activity_id}",
+        f"https://api.ticketplus.com.tw/config/api/v1/get?activityId={activity_id}"
+    ]
+    
+    for url in endpoints:
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                sessions = data.get("result", {}).get("session", [])
+                if sessions:
+                    print(f"成功從 API ({url.split('?')[0].split('/')[-1]}) 取得 {len(sessions)} 個場次")
+                    return sessions
+            else:
+                print(f"⚠️ API 嘗試回傳非 200 狀態碼 ({resp.status_code}): {url}")
+        except Exception as e:
+            print(f"⚠️ API 請求異常: {e}")
+            
+    return []
+
 def get_session_ticket_details(session_id):
     """深入查詢特定場次 (sessionId) 內各票價區域的明細狀態"""
     try:
@@ -64,57 +86,44 @@ def get_session_ticket_details(session_id):
 
 def check_ticket_status(): 
     """查詢 TicketPlus API 檢查場次與各票區售票狀態""" 
-    try: 
-        resp = requests.get(SESSION_API_URL, headers=HEADERS, timeout=15) 
-        resp.raise_for_status() 
-        data = resp.json()
+    sessions = get_sessions_from_api(ACTIVITY_ID)
+    
+    if not sessions:
+        print("❌ 無法取得場次資料（所有 API 端點皆未回應有效資料）")
+        return "無資料"
+
+    changed_sessions = []
+
+    for session in sessions:
+        name = session.get("name", "演唱會場次")
+        session_id = session.get("id", "")
+        status = str(session.get("status", "")).lower().strip()
         
-        sessions = data.get("result", {}).get("session", [])
-        if not sessions:
-            get_url = f"https://api.ticketplus.com.tw/config/api/v1/get?activityId={ACTIVITY_ID}"
-            resp = requests.get(get_url, headers=HEADERS, timeout=15)
-            data = resp.json()
-            sessions = data.get("result", {}).get("session", [])
-
-        print(f"成功連線 API，共找到 {len(sessions)} 個場次")
-
-        changed_sessions = []
-
-        for session in sessions:
-            name = session.get("name", "演唱會場次")
-            session_id = session.get("id", "")
-            status = str(session.get("status", "")).lower().strip()
+        print(f"📌 [場次 API] {name} | sessionId: {session_id} | status: '{status}'")
+        
+        # 只要狀態不是純粹完售 (soldout/ended)，代表有釋票或狀態改變
+        if status not in ["soldout", "ended", ""]:
+            session_msg = f"🎫 <b>{name}</b> (狀態: <code>{status}</code>)"
             
-            print(f"📌 [場次 API] {name} | sessionId: {session_id} | status: '{status}'")
+            if session_id:
+                ticket_details = get_session_ticket_details(session_id)
+                if ticket_details:
+                    session_msg += "\n" + "\n".join(ticket_details)
             
-            # 只要狀態不是純粹完售 (soldout/ended)，代表有釋票或狀態改變
-            if status not in ["soldout", "ended", ""]:
-                session_msg = f"🎫 <b>{name}</b> (狀態: <code>{status}</code>)"
-                
-                # 取得該場次具體的票區價位明細
-                if session_id:
-                    ticket_details = get_session_ticket_details(session_id)
-                    if ticket_details:
-                        session_msg += "\n" + "\n".join(ticket_details)
-                
-                changed_sessions.append(session_msg)
+            changed_sessions.append(session_msg)
 
-        if changed_sessions:
-            msg = (
-                f"🚨🚨🚨 <b>[測試通知] 演唱會狀態改變 / 有票釋出！</b>\n\n"
-                + "\n\n".join(changed_sessions)
-                + f"\n\n👉 快去搶票：{ACTIVITY_URL}"
-            )
-            print("🎉 偵測到狀態改變，準備發送 Telegram 通知！")
-            send_telegram(msg)
-            return "狀態變更/有票"
-        else:
-            print("😢 目前所有場次 API 狀態均為 soldout")
-            return "全數售完"
-
-    except Exception as e: 
-        print(f"❌ 查詢 API 失敗: {e}") 
-        return "錯誤"
+    if changed_sessions:
+        msg = (
+            f"🚨🚨🚨 <b>[測試通知] 演唱會狀態改變 / 有票釋出！</b>\n\n"
+            + "\n\n".join(changed_sessions)
+            + f"\n\n👉 快去搶票：{ACTIVITY_URL}"
+        )
+        print("🎉 偵測到狀態改變，準備發送 Telegram 通知！")
+        send_telegram(msg)
+        return "狀態變更/有票"
+    else:
+        print("😢 目前所有場次 API 狀態均為 soldout")
+        return "全數售完"
 
 if __name__ == "__main__":
     print("=" * 50)
