@@ -2,7 +2,7 @@ import os
 from playwright.sync_api import sync_playwright
 import requests
 
-ACTIVITY_ID = "7f9c57d1f3e5c15d97c51408f26ca085"
+ACTIVITY_ID = "38de5d057abe14c194971b35d4b3484e"
 ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") 
