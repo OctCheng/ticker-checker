@@ -31,30 +31,40 @@ def check_ticket_status():
         page = context.new_page()
         
         try:
+            # 前往網頁，等待網路閒置
             page.goto(ACTIVITY_URL, timeout=30000, wait_until="networkidle")
-            page.wait_for_timeout(6000) # 給足夠時間讓畫面渲染完畢
+            
+            # 額外等待 6 秒，確保遠大售票的動態 JavaScript 把真實票況渲染完畢
+            page.wait_for_timeout(6000)
             
             page_text = page.inner_text("body")
             print(f"成功擷取頁面文字，長度: {len(page_text)} 字元")
             
-            # 檢查是否有活動標題，確保不是空白頁面
-            if "田馥甄" in page_text or "Hebe" in page_text:
-                # 判斷是否全數完售
-                has_sold_out = "銷售一空" in page_text
-                print(f"狀態檢查 -> 是否包含『銷售一空』: {has_sold_out}")
-                
-                # 只有當「銷售一空」完全消失，且網頁上出現「立即購買」或「選購」時才通知
-                if not has_sold_out and ("立即購買" in page_text or "選購" in page_text):
-                    print("🎉 發現『銷售一空』消失，且出現購票按鈕！")
-                    msg = (
-                        f"🚨🚨🚨 <b>田馥甄演唱會出現購票按鈕！快搶！</b>\n\n"
-                        f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
-                    )
-                    send_telegram(msg)
-                else:
-                    print("😢 目前所有場次均確定【銷售一空】或尚未開賣，不發送通知")
+            # 檢查是否還在讀取中
+            if "Loading..." in page_text:
+                print("⏳ 頁面仍在 Loading，再多等 3 秒...")
+                page.wait_for_timeout(3000)
+                page_text = page.inner_text("body")
+
+            # 判斷當前狀態：
+            # 如果全面完售，遠大售票通常會顯示「銷售一空」
+            # 如果有釋票或能買，會出現真正的可點擊購票按鈕或「暫無票券」
+            has_sold_out = "銷售一空" in page_text
+            
+            # 為了精準避開導覽列的「立即購買」，我們檢查頁面上是否有「銷售一空」以外的狀態
+            # 當真正有票時，「銷售一空」的字樣會減少或消失，並出現可以買的按鈕
+            print(f"狀態判定 -> 是否包含『銷售一空』: {has_sold_out}")
+            
+            if not has_sold_out and ("立即購買" in page_text or "選購" in page_text or "暫無票券" in page_text):
+                print("🎉 發現異常！『銷售一空』消失或出現購票/暫無票券狀態！")
+                msg = (
+                    f"🚨🚨🚨 <b>田馥甄演唱會票況有重大變化！</b>\n\n"
+                    f"系統偵測到頁面不再全是完售狀態，可能有機會搶票！\n\n"
+                    f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
+                )
+                send_telegram(msg)
             else:
-                print("⚠️ 警告：頁面尚未完整載入活動資訊")
+                print("😢 目前所有場次均確定【銷售一空】，不發送通知")
                 
         except Exception as e:
             print(f"❌ 發生異常: {e}")
