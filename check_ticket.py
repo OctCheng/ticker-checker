@@ -39,13 +39,14 @@ def check_ticket_status():
                 print("🎉 偵測到有場次狀態改變（出現暫無票券或可購買）！")
                 msg = (
                     f"🚨🚨🚨 <b>田馥甄演唱會票況有變化！</b>\n\n"
-                    f"系統偵測到頁面出現非全數完售的狀態，可能有釋票或清票！\n\n"
+                    f"系統偵測到頁面出現非全數完售的狀態！\n\n"
+                    f"<b>當前抓到的網頁狀態文字片段：</b>\n"
+                    f"<code>{page_text[:150]}...</code>\n\n"
                     f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
                 )
                 send_telegram(msg)
                 return "有票/狀態改變"
             else:
-                # 目前全部完售，只在 GitHub 記錄印出文字，絕對不發送 Telegram 騷擾妳
                 print("😢 目前所有場次均顯示【銷售一空】，不發送通知")
                 return "全數售完"
                 
