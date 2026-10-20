@@ -23,7 +23,6 @@ def check_ticket_status():
     print("🌐 正在透過背景瀏覽器檢查田馥甄演唱會票況...")
     
     with sync_playwright() as p:
-        # 使用非 headless 模式或加上更多防偵測參數，避免被擋
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -32,30 +31,40 @@ def check_ticket_status():
         page = context.new_page()
         
         try:
-            page.goto(ACTIVITY_URL, timeout=30000, wait_until="domcontentloaded")
-            page.wait_for_timeout(5000) # 多給幾秒鐘讓動態資料跑出來
+            # 前往網頁，等待網路閒置
+            page.goto(ACTIVITY_URL, timeout=30000, wait_until="networkidle")
+            
+            # 額外等待 6 秒，確保遠大售票的動態 JavaScript 把真實票況渲染完畢
+            page.wait_for_timeout(6000)
             
             page_text = page.inner_text("body")
             print(f"成功擷取頁面文字，長度: {len(page_text)} 字元")
-            print("--- 抓到的頁面內容預覽開始 ---")
-            print(page_text[:500]) # 印出前 500 字看看裡面到底有什麼
-            print("--- 抓到的頁面內容預覽結束 ---")
             
-            # 必須同時確保頁面包含活動關鍵字（證明不是被 Cloudflare 擋下的空白或防護頁面）
-            if "田馥甄" in page_text or "Hebe" in page_text:
-                has_buy = "立即購買" in page_text or "選購" in page_text
-                
-                if has_buy and "銷售一空" not in page_text:
-                    print("🎉 真的偵測到有票可以買！")
-                    msg = (
-                        f"🚨🚨🚨 <b>田馥甄演唱會出現購票按鈕！快搶！</b>\n\n"
-                        f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
-                    )
-                    send_telegram(msg)
-                else:
-                    print("😢 頁面正常，但目前所有場次均顯示【銷售一空】")
+            # 檢查是否還在讀取中
+            if "Loading..." in page_text:
+                print("⏳ 頁面仍在 Loading，再多等 3 秒...")
+                page.wait_for_timeout(3000)
+                page_text = page.inner_text("body")
+
+            # 判斷當前狀態：
+            # 如果全面完售，遠大售票通常會顯示「銷售一空」
+            # 如果有釋票或能買，會出現真正的可點擊購票按鈕或「暫無票券」
+            has_sold_out = "銷售一空" in page_text
+            
+            # 為了精準避開導覽列的「立即購買」，我們檢查頁面上是否有「銷售一空」以外的狀態
+            # 當真正有票時，「銷售一空」的字樣會減少或消失，並出現可以買的按鈕
+            print(f"狀態判定 -> 是否包含『銷售一空』: {has_sold_out}")
+            
+            if not has_sold_out and ("立即購買" in page_text or "選購" in page_text or "暫無票券" in page_text):
+                print("🎉 發現異常！『銷售一空』消失或出現購票/暫無票券狀態！")
+                msg = (
+                    f"🚨🚨🚨 <b>田馥甄演唱會票況有重大變化！</b>\n\n"
+                    f"系統偵測到頁面不再全是完售狀態，可能有機會搶票！\n\n"
+                    f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票頁面</a>"
+                )
+                send_telegram(msg)
             else:
-                print("⚠️ 警告：頁面可能被 Cloudflare 攔截或尚未完全載入活動頁面！")
+                print("😢 目前所有場次均確定【銷售一空】，不發送通知")
                 
         except Exception as e:
             print(f"❌ 發生異常: {e}")
