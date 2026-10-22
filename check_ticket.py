@@ -1,6 +1,5 @@
 import os
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
 import requests
 
 ACTIVITY_ID = "af2bd66d8fe65d78963cbb5bdc85771c"
@@ -21,18 +20,22 @@ def send_telegram(message):
 
 def check_ticket_status():
     print("=" * 50)
-    print("🌐 啟動遠大售票 (TicketPlus) 專用刷票引擎 [隱身模式啟動]...")
+    print("🌐 啟動遠大售票 (TicketPlus) 專用刷票引擎 [手動隱身版]...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # 【關鍵魔法 1】：加上啟動參數，隱藏自動化控制特徵
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"]
+        )
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800}
         )
         page = context.new_page()
         
-        # 【關鍵魔法】：為這個網頁套上隱形斗篷，抹除機器人特徵
-        stealth_sync(page)
+        # 【關鍵魔法 2】：手動注入 JavaScript 抹除機器人的 WebDriver 標籤
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
         
         try:
             page.goto(ACTIVITY_URL, timeout=30000)
