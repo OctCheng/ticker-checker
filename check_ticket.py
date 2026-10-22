@@ -1,9 +1,9 @@
 import os
-from playwright.sync_api import sync_playwright
 import requests
+import json
 
-ACTIVITY_ID = "af2bd66d8fe65d78963cbb5bdc85771c"
-ACTIVITY_URL = f"https://ticketplus.com.tw/activity/{ACTIVITY_ID}"
+API_URL = "https://apis.ticketplus.com.tw/config/api/v1/getS3?path=event/af2bd66d8fe65d78963cbb5bdc85771c/event.json"
+ACTIVITY_URL = "https://ticketplus.com.tw/activity/af2bd66d8fe65d78963cbb5bdc85771c"
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "") 
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -18,67 +18,46 @@ def send_telegram(message):
     except Exception: 
         pass
 
-def check_ticket_status():
+def check_ticket_api():
     print("=" * 50)
-    print("🌐 啟動遠大售票 (TicketPlus) 專用刷票引擎 [手動隱身版]...")
+    print("🚀 啟動 API 直連探勘模式 (不依賴瀏覽器)...")
     
-    with sync_playwright() as p:
-        # 【關鍵魔法 1】：加上啟動參數，隱藏自動化控制特徵
-        browser = p.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800}
-        )
-        page = context.new_page()
+    # 偽裝成正常的瀏覽器發送 API 請求
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://ticketplus.com.tw",
+        "Referer": f"https://ticketplus.com.tw/activity/af2bd66d8fe65d78963cbb5bdc85771c"
+    }
+    
+    try:
+        # 直接用 requests 敲 API，速度極快，不用等載入！
+        response = requests.get(API_URL, headers=headers, timeout=15)
         
-        # 【關鍵魔法 2】：手動注入 JavaScript 抹除機器人的 WebDriver 標籤
-        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
-        
-        try:
-            page.goto(ACTIVITY_URL, timeout=30000)
+        if response.status_code == 200:
+            print("✅ 成功突破防線！取得 API JSON 資料！")
             
-            print("⏳ 等待 10 秒讓遠大售票載入真實票況...")
-            page.wait_for_timeout(10000) 
+            # 將資料轉為字典格式
+            data = response.json()
             
-            page_text = page.inner_text("body")
+            # 把 JSON 轉回字串印出來看結構 (印出前 1500 字元)
+            data_str = json.dumps(data, ensure_ascii=False)
+            print(f"資料總長度: {len(data_str)} 字元")
+            print("--- JSON 內容預覽開始 ---")
+            print(data_str[:1500])
+            print("--- JSON 內容預覽結束 ---")
             
-            if "Loading..." in page_text:
-                print("⏳ 網頁仍在 Loading，追加等待 5 秒...")
-                page.wait_for_timeout(5000)
-                page_text = page.inner_text("body")
+            print("⚠️ 探勘完成：請查看上方 JSON 預覽內容。")
+            print("接下來我們只要看裡面代表『完售』的英文關鍵字是什麼，就能寫出無敵的判斷式！")
             
-            print(f"✅ 成功擷取頁面，長度: {len(page_text)} 字元")
-
-            if "售票狀態" not in page_text:
-                print("⚠️ 找不到『售票狀態』，可能仍遭阻擋或網頁尚未載入完成。")
-                return
+        else:
+            print(f"❌ API 請求失敗，狀態碼: {response.status_code}")
+            print(response.text)
             
-            is_sold_out = "銷售一空" in page_text
-            has_ticket = "選購" in page_text
-            has_buffer = "暫無票券" in page_text
-            
-            print(f"📊 當前狀態分析 -> 銷售一空: {is_sold_out} | 選購: {has_ticket} | 暫無票券: {has_buffer}")
-            
-            if has_ticket or has_buffer:
-                print("🎉 發現目標！狀態改變，發送 Telegram 通知！")
-                msg = (
-                    f"🚨🚨🚨 <b>田馥甄演唱會 票況變動！</b>\n\n"
-                    f"系統偵測到遠大售票出現 <b>「{'選購' if has_ticket else '暫無票券'}」</b> 狀態！\n"
-                    f"極可能是清票或釋票，快衝！\n\n"
-                    f"👉 <a href='{ACTIVITY_URL}'>點此立刻前往搶票</a>"
-                )
-                send_telegram(msg)
-            else:
-                print("😢 目前場次仍為【銷售一空】，系統安靜待機中。")
-
-        except Exception as e:
-            print(f"❌ 發生異常: {e}")
-        finally:
-            browser.close()
-            print("=" * 50)
+    except Exception as e:
+        print(f"❌ 發生異常: {e}")
+    finally:
+        print("=" * 50)
 
 if __name__ == "__main__":
-    check_ticket_status()
+    check_ticket_api()
